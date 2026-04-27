@@ -149,7 +149,19 @@ if __name__ == '__main__':
     parser.add_argument('--hgt_out_dim',  type=int,   default=200)
     parser.add_argument('--tr_layer',     type=int,   default=2)
     parser.add_argument('--tr_head',      type=int,   default=4)
+    # ── Resource / speed controls ──────────────────────────────────
+    parser.add_argument('--num_threads',  type=int,   default=4,
+                        help='Max CPU threads for PyTorch (lower = less heat)')
+    parser.add_argument('--eval_every',   type=int,   default=5,
+                        help='Evaluate on test set every N epochs (1 = every epoch)')
+    parser.add_argument('--patience',     type=int,   default=50,
+                        help='Early-stop if AUC does not improve for this many evals')
     args = parser.parse_args()
+
+    # Limit CPU threads to reduce heat; small graph → not compute-bound
+    torch.set_num_threads(args.num_threads)
+    torch.set_num_interop_threads(max(1, args.num_threads // 2))
+    print(f'CPU threads: {args.num_threads} (intraop) / {max(1, args.num_threads // 2)} (interop)')
 
     # Paths
     args.data_dir = os.path.join(AMDGT_DIR, 'data', args.dataset) + os.sep
@@ -239,6 +251,8 @@ if __name__ == '__main__':
         best_test_prob = None
         best_X_test_np = None
 
+        no_improve_evals = 0  # early-stopping counter
+
         for epoch in range(args.epochs):
             # --- train ---
             model.train()
@@ -250,6 +264,12 @@ if __name__ == '__main__':
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
+
+            # Evaluate every eval_every epochs (or on the last epoch)
+            is_eval_epoch = ((epoch + 1) % args.eval_every == 0
+                             or epoch == args.epochs - 1)
+            if not is_eval_epoch:
+                continue
 
             # --- eval ---
             with torch.no_grad():
@@ -274,6 +294,13 @@ if __name__ == '__main__':
                 torch.save(model.state_dict(),
                            os.path.join(models_dir, f'AMNTDDA_Fuzzy_fold{fold_idx}.pt'))
                 print(f'  ↑ AUC improved at epoch {epoch+1}: {best_auc:.5f}')
+                no_improve_evals = 0
+            else:
+                no_improve_evals += 1
+                if no_improve_evals >= args.patience:
+                    print(f'  Early stop at epoch {epoch+1} '
+                          f'(no AUC improvement for {args.patience} evals)')
+                    break
 
         GCN_AUCs.append(best_auc)
         GCN_AUPRs.append(best_metrics.get('AUPR', 0))

@@ -52,8 +52,8 @@ from metric import get_metric, metrics_to_dict, print_metric_header, print_metri
 from model.AMNTDDA_Ablation import AMNTDDA_Ablation, ABLATION_CONFIGS, VARIANT_ORDER
 from topo_analysis import compute_topo_features
 
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
+#device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+device = torch.device('cpu')
 
 # ── Helpers ───────────────────────────────────────────────────────────
 

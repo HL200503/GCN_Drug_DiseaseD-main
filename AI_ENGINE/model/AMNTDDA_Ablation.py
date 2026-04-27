@@ -225,7 +225,7 @@ class AMNTDDA_Ablation(nn.Module):
 
         if self.use_sim and not self.use_gcn:
             # Similarity only (with or without transformer)
-            dr_a, di_a = dr_sim, dr_sim
+            dr_a, di_a = dr_sim, di_sim
             dr_b, di_b = dr_sim, di_sim  # b-slot repeated
 
         elif not self.use_sim and self.use_gcn:

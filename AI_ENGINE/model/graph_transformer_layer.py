@@ -47,15 +47,20 @@ class MultiHeadAttentionLayer(nn.Module):
         g.send_and_recv(eids, fn.copy_e('score', 'score'), fn.sum('score', 'z'))
 
     def forward(self, g, h):
-        Q_h = self.Q(h)
-        K_h = self.K(h)
-        V_h = self.V(h)
-        g.ndata['Q_h'] = Q_h.view(-1, self.num_heads, self.out_dim)
-        g.ndata['K_h'] = K_h.view(-1, self.num_heads, self.out_dim)
-        g.ndata['V_h'] = V_h.view(-1, self.num_heads, self.out_dim)
-        self.propagate_attention(g)
-        head_out = g.ndata['wV'] / (g.ndata['z'] + torch.full_like(g.ndata['z'], 1e-6))
-        return head_out
+        # local_scope() isolates ndata/edata writes to this call only.
+        # Without it, DGL does an in-place copy_ when overwriting an existing
+        # ndata key with the same shape, which corrupts the autograd graph
+        # when multiple GT layers share the same graph object.
+        with g.local_scope():
+            Q_h = self.Q(h)
+            K_h = self.K(h)
+            V_h = self.V(h)
+            g.ndata['Q_h'] = Q_h.view(-1, self.num_heads, self.out_dim)
+            g.ndata['K_h'] = K_h.view(-1, self.num_heads, self.out_dim)
+            g.ndata['V_h'] = V_h.view(-1, self.num_heads, self.out_dim)
+            self.propagate_attention(g)
+            head_out = g.ndata['wV'] / (g.ndata['z'] + torch.full_like(g.ndata['z'], 1e-6))
+            return head_out
 
 
 class GraphTransformerLayer(nn.Module):
