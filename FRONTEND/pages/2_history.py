@@ -20,11 +20,14 @@ st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
 *, body { font-family: 'Inter', sans-serif !important; }
+[data-testid="stIconMaterial"], span[translate="no"] { font-family: "Material Symbols Rounded", "Material Icons", sans-serif !important; }
 [data-testid="stAppViewContainer"] { background: #f1f5f9; }
 [data-testid="stSidebar"] { background: #ffffff !important; border-right: 1px solid #1e293b; }
-#MainMenu, footer, header { visibility: hidden; }
-[data-testid="stDecoration"] { display: none; }
-.stDeployButton { display: none; }
+#MainMenu, footer { display: none !important; }
+[data-testid="stDecoration"] { display: none !important; }
+[data-testid="stToolbarActions"] { display: none !important; }
+.stDeployButton { display: none !important; }
+[data-testid="stHeader"] { background: transparent !important; border: none !important; }
 ::-webkit-scrollbar { width: 5px; }
 ::-webkit-scrollbar-track { background: #f1f5f9; }
 ::-webkit-scrollbar-thumb { background: #6366f1; border-radius: 4px; }

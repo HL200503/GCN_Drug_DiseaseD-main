@@ -21,6 +21,12 @@ import argparse
 import json
 from typing import Optional, List
 
+# Force UTF-8 stdout to avoid UnicodeEncodeError on Windows cp932 terminals
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+if hasattr(sys.stderr, 'reconfigure'):
+    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+
 import numpy as np
 import pandas as pd
 from pathlib import Path
@@ -149,6 +155,19 @@ def _print_summary_table(summaries: dict):
 
 # ── Train one variant for all folds ──────────────────────────────────
 
+def variant_is_trained(results_dir: str, dataset: str, variant: str) -> bool:
+    """Return True if a summary JSON already exists for this variant."""
+    summary_path = os.path.join(results_dir, f'{dataset}_ablation_{variant}_summary.json')
+    return os.path.exists(summary_path)
+
+
+def load_existing_summary(results_dir: str, dataset: str, variant: str) -> dict:
+    """Load and return an existing summary JSON."""
+    p = os.path.join(results_dir, f'{dataset}_ablation_{variant}_summary.json')
+    with open(p, encoding='utf-8') as fh:
+        return json.load(fh)
+
+
 def train_variant(variant: str, args, data: dict,
                   drdr_graph, didi_graph,
                   drug_feature: torch.Tensor,
@@ -157,7 +176,8 @@ def train_variant(variant: str, args, data: dict,
                   drug_topo: torch.Tensor,
                   disease_topo: torch.Tensor,
                   results_dir: str,
-                  models_dir: str) -> dict:
+                  models_dir: str,
+                  force: bool = False) -> dict:
     """Train one ablation variant for k_fold folds. Returns summary dict."""
 
     cfg = ABLATION_CONFIGS[variant]
@@ -168,9 +188,9 @@ def train_variant(variant: str, args, data: dict,
           f"use_trans={cfg['use_trans']}  cross_modal={cfg['cross_modal']}")
     print(f"{'#'*70}")
 
-    # Reset fold CSV for fresh run
+    # Reset fold CSV for fresh run (only when forced)
     old_csv = _csv_path(results_dir, args.dataset, variant)
-    if os.path.exists(old_csv):
+    if force and os.path.exists(old_csv):
         os.remove(old_csv)
 
     cross_entropy = nn.CrossEntropyLoss()
@@ -279,6 +299,9 @@ if __name__ == '__main__':
         '--variants', default='all',
         help='Comma-separated variant names or "all". '
              f'Available: {",".join(VARIANT_ORDER)}')
+    parser.add_argument(
+        '--force', action='store_true', default=False,
+        help='Re-train even if results already exist for a variant')
     args = parser.parse_args()
 
     # Resolve variants list
@@ -335,6 +358,14 @@ if __name__ == '__main__':
     # ── Train each variant ────────────────────────────────────────────
     all_summaries: dict = {}
     for variant in run_variants:
+        # ── Skip if already trained and --force not set ───────────────
+        if not args.force and variant_is_trained(results_dir, args.dataset, variant):
+            print(f"\n[SKIP] {variant}: results already exist "
+                  f"(use --force to retrain)")
+            all_summaries[variant] = load_existing_summary(
+                results_dir, args.dataset, variant)
+            continue
+
         summary = train_variant(
             variant=variant,
             args=args,
@@ -348,6 +379,7 @@ if __name__ == '__main__':
             disease_topo=disease_topo,
             results_dir=results_dir,
             models_dir=models_dir,
+            force=args.force,
         )
         if summary:
             all_summaries[variant] = summary

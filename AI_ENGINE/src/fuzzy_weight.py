@@ -122,7 +122,7 @@ class MamdaniFIS:
 def apply_fuzzy_logic():
     fis = MamdaniFIS()
     demo = fis.get_memberships(0.75, 0.60, 0.55)
-    print(">>> ĐÃ SẴN SÀNG HỆ THỐNG FUZZY ĐỂ LỌC NHIỄU!")
+    print(">>> Fuzzy system ready!")
     print(f"Demo output (cf=0.75, src=0.60, tgt=0.55): fuzzy_score={demo['fuzzy_score']}")
     return fis
 

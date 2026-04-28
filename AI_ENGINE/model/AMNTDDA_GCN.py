@@ -78,8 +78,9 @@ class AMNTDDA_GCN(nn.Module):
             num_encoder_layers=3, num_decoder_layers=3, batch_first=True)
 
         # ── Prediction MLP ─────────────────────────────────────────────
+        # pair = cat(drug_embed, disease_embed) = 2 * (2 * gt_out_dim) = 4 * gt_out_dim
         self.mlp = nn.Sequential(
-            nn.Linear(args.gt_out_dim * 2, 1024),
+            nn.Linear(args.gt_out_dim * 4, 1024),
             nn.ReLU(),
             nn.Dropout(0.4),
             nn.Linear(1024, 1024),

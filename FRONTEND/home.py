@@ -25,6 +25,7 @@ st.markdown("""
 *, body, [data-testid="stAppViewContainer"] {
     font-family: 'Inter', sans-serif !important;
 }
+[data-testid="stIconMaterial"], span[translate="no"] { font-family: "Material Symbols Rounded", "Material Icons", sans-serif !important; }
 [data-testid="stAppViewContainer"] {
     background: #f1f5f9;
     min-height: 100vh;
@@ -36,9 +37,11 @@ st.markdown("""
 [data-testid="stSidebar"] > div:first-child { padding-top: 0; }
 
 /* ── Hide default decoration ── */
-#MainMenu, footer, header { visibility: hidden; }
-[data-testid="stDecoration"] { display: none; }
-.stDeployButton { display: none; }
+#MainMenu, footer { display: none !important; }
+[data-testid="stDecoration"] { display: none !important; }
+[data-testid="stToolbarActions"] { display: none !important; }
+.stDeployButton { display: none !important; }
+[data-testid="stHeader"] { background: transparent !important; border: none !important; }
 
 /* ── Scrollbar ── */
 ::-webkit-scrollbar { width: 5px; }

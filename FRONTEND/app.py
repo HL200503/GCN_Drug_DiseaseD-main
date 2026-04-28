@@ -23,6 +23,7 @@ pg = st.navigation(
         st.Page("pages/1_prediction.py", title="Du doan & Phan tich", icon="🔬"),
         st.Page("pages/2_history.py",    title="Lich su",           icon="📋"),
         st.Page("pages/3_model_stages.py", title="Cac giai doan mo hinh goc", icon="🧬"),
+        st.Page("pages/5_drug_generation.py", title="Sinh Thuoc Moi (VGAE)", icon="🧪"),
     ],
     position="hidden",
 )

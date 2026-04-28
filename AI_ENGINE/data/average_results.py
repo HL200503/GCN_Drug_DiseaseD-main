@@ -70,7 +70,7 @@ def compute_average(dataset: str, model_name: str) -> dict | None:
 
 def compare_models(dataset: str) -> dict:
     """Merge summaries for all available models into a comparison JSON."""
-    model_names = ['AMNTDDA', 'AMNTDDA_Fuzzy']
+    model_names = ['AMNTDDA', 'AMNTDDA_GCN', 'AMNTDDA_Fuzzy']
     comparison  = {'dataset': dataset, 'models': {}}
 
     for name in model_names:

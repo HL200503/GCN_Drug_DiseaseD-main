@@ -169,3 +169,43 @@ def get_drug_disease_interaction(drug_idx: int, disease_idx: int,
 def classify_batch(dataset: str, entity: str = "drug", limit: int = 50) -> dict:
     return _get(f"{_AI}/classify/batch",
                 {"dataset": dataset, "entity": entity, "limit": limit}) or {}
+
+
+# ── VGAE Drug Generation ───────────────────────────────────────────────────
+def run_vgae(dataset: str = "B-dataset") -> dict:
+    """Gọi POST /vgae/run để train VGAE và sinh liên kết thuốc-protein mới."""
+    try:
+        r = requests.post(f"{_AI}/vgae/run", params={"dataset": dataset}, timeout=360)
+        r.raise_for_status()
+        return r.json()
+    except Exception as e:
+        return {"success": False, "log": str(e), "dataset": dataset}
+
+
+def get_vgae_results(dataset: str = "B-dataset") -> dict:
+    """Gọi GET /vgae/results để lấy danh sách liên kết đã sinh."""
+    return _get(f"{_AI}/vgae/results", {"dataset": dataset}) or {}
+
+
+def get_comparison_ai(dataset: str = "C-dataset") -> dict:
+    """Lấy so sánh AMNTDDA gốc vs AMNTDDA_Fuzzy trực tiếp từ AI Engine."""
+    return _get(f"{_AI}/results/comparison", {"dataset": dataset}) or {}
+
+
+def get_ablation_all_variants_ai(dataset: str = "C-dataset") -> dict:
+    """Lấy summary tất cả 7 ablation variants từ AI Engine."""
+    return _get(f"{_AI}/results/ablation/all_variants", {"dataset": dataset}) or {}
+
+
+def run_ablation_ai(dataset: str = "C-dataset", variants: str = "all", force: bool = False) -> dict:
+    """Chạy ablation training qua AI Engine subprocess."""
+    try:
+        import requests as _req
+        r = _req.post(
+            f"{_AI}/train/ablation",
+            json={"dataset": dataset, "variants": variants, "force": force},
+            timeout=3600,
+        )
+        return r.json()
+    except Exception as e:
+        return {"success": False, "log": str(e)}

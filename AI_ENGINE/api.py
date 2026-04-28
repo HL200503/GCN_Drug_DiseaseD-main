@@ -17,8 +17,9 @@ import sys
 import json
 import numpy as np
 import pandas as pd
+import torch
 from typing import Optional, List
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Body
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -865,6 +866,96 @@ def get_stage_result(stage: str = Query(...),
                                  f"Vui lòng chạy run_base_stages.py trước.")
     with open(result_file, encoding='utf-8') as fh:
         return json.load(fh)
+
+
+# ── VGAE Drug Generation ──────────────────────────────────────────────
+
+@app.post("/train/ablation")
+def run_ablation(dataset: str = Body("C-dataset"), variants: str = Body("all"), force: bool = Body(False)):
+    """Chạy train_DDA_ablation.py để train các ablation variants."""
+    import subprocess
+    script = os.path.join(SRC_DIR, 'train_DDA_ablation.py')
+    if not os.path.exists(script):
+        raise HTTPException(404, "train_DDA_ablation.py không tìm thấy")
+    cmd = [sys.executable, script, '--dataset', dataset]
+    if variants and variants != "all":
+        cmd += ['--variants', variants]
+    if force:
+        cmd += ['--force']
+    try:
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=7200,
+            cwd=THIS_DIR, env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+        )
+        log = result.stdout + result.stderr
+        ok  = result.returncode == 0
+        return {"success": ok, "log": log, "dataset": dataset}
+    except subprocess.TimeoutExpired:
+        return {"success": False, "log": "Timeout: quá 2 giờ", "dataset": dataset}
+    except Exception as e:
+        return {"success": False, "log": str(e), "dataset": dataset}
+
+
+@app.post("/vgae/run")
+def run_vgae(dataset: str = Query("B-dataset")):
+    """Chạy train_vgae.py để sinh liên kết thuốc-protein mới."""
+    import subprocess
+    script = os.path.join(SRC_DIR, 'train_vgae.py')
+    if not os.path.exists(script):
+        raise HTTPException(404, "train_vgae.py không tìm thấy")
+    try:
+        result = subprocess.run(
+            [sys.executable, script, '--dataset', dataset],
+            capture_output=True, text=True, timeout=300,
+            cwd=THIS_DIR,
+        )
+        log = result.stdout + result.stderr
+        ok  = result.returncode == 0
+        return {"success": ok, "log": log, "dataset": dataset}
+    except subprocess.TimeoutExpired:
+        return {"success": False, "log": "Timeout: quá 5 phút", "dataset": dataset}
+    except Exception as e:
+        return {"success": False, "log": str(e), "dataset": dataset}
+
+
+@app.get("/vgae/results")
+def get_vgae_results(dataset: str = Query("B-dataset")):
+    """Trả về danh sách liên kết thuốc-protein mới được sinh ra."""
+    results_dir = os.path.join(DATA_OUT_DIR, 'results')
+    pt_path     = os.path.join(results_dir, f'{dataset}_generated_edges.pt')
+    if not os.path.exists(pt_path):
+        return {"dataset": dataset, "generated": False, "edges": []}
+
+    edges = torch.load(pt_path, weights_only=True).tolist()
+
+    # Load drug/protein names
+    meta = _load_metadata(dataset)
+    drug_by_idx    = {item['idx']: item for item in meta.get('drugs', [])}
+    protein_by_idx = {item['idx']: item for item in meta.get('proteins', [])}
+
+    # Compute offset (number of drugs)
+    base = os.path.join(AMDGT_DIR, 'data', dataset)
+    n_drug = 0
+    fp_path = os.path.join(base, 'DrugFingerprint.csv')
+    if os.path.exists(fp_path):
+        n_drug = len(pd.read_csv(fp_path, index_col=0))
+
+    enriched = []
+    for u, v in edges:
+        drug_idx = int(u)
+        prot_idx = int(v) - n_drug
+        d_info = drug_by_idx.get(drug_idx, {})
+        p_info = protein_by_idx.get(prot_idx, {})
+        enriched.append({
+            "drug_idx":   drug_idx,
+            "prot_idx":   prot_idx,
+            "drug_name":  d_info.get('name', f'Drug_{drug_idx}'),
+            "drug_id":    d_info.get('id', ''),
+            "prot_name":  p_info.get('name', f'Protein_{prot_idx}'),
+            "prot_id":    p_info.get('id', ''),
+        })
+
+    return {"dataset": dataset, "generated": True, "count": len(enriched), "edges": enriched}
 
 
 if __name__ == "__main__":

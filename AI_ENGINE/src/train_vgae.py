@@ -1,49 +1,73 @@
 import torch
-import psycopg2
 import numpy as np
-import time
+import pandas as pd
+import argparse
 import os
+import sys
 from graph_vae import build_vgae, generate_new_edges
 
 # --- CẤU HÌNH ---
-DB_URL = "postgresql://postgres:a@localhost:5432/GCH_ThuocBenh"
 EPOCHS = 500
 LR = 0.01
 
-def load_graph_data():
-    conn = psycopg2.connect(DB_URL)
-    cursor = conn.cursor()
-    
-    # 1. Padding vector
-    all_lengths = []
-    for table in ["drug", "protein"]:
-        cursor.execute(f"SELECT array_length(embedding, 1) FROM {table}")
-        res = cursor.fetchall()
-        all_lengths.extend([r[0] for r in res if r[0] is not None])
-    
-    TARGET_LEN = max(all_lengths) if all_lengths else 774
+THIS_DIR   = os.path.dirname(os.path.abspath(__file__))
+AMDGT_DIR  = os.path.abspath(os.path.join(THIS_DIR, '..', '..', 'AMDGT_main'))
+OUTPUT_DIR = os.path.abspath(os.path.join(THIS_DIR, '..', 'data', 'results'))
 
-    def fetch_and_pad(table):
-        cursor.execute(f"SELECT embedding FROM {table} ORDER BY {table}_id")
-        rows = cursor.fetchall()
-        return [list(r[0]) + [0.0] * (TARGET_LEN - len(r[0])) for r in rows]
 
-    x_drug = fetch_and_pad("drug")
-    x_prot = fetch_and_pad("protein")
-    x = torch.tensor(x_drug + x_prot, dtype=torch.float)
-    
-    # 2. Lấy cạnh hiện tại
-    cursor.execute("SELECT drug_id, protein_id FROM drug_protein")
-    edges_raw = cursor.fetchall()
-    
-    offset_p = len(x_drug)
-    edge_index = torch.tensor([[d-1, p-1+offset_p] for d, p in edges_raw], dtype=torch.long).t().contiguous()
-    
-    conn.close()
-    return x, edge_index, len(x_drug), offset_p
+def load_graph_data(dataset: str = 'B-dataset'):
+    """Đọc dữ liệu từ CSV files trong AMDGT_main/data/{dataset}."""
+    base = os.path.join(AMDGT_DIR, 'data', dataset)
+    if not os.path.isdir(base):
+        raise FileNotFoundError(f"Dataset không tồn tại: {base}")
 
-def train_vgae():
-    x, edge_index, n_drug, offset_p = load_graph_data()
+    # ── Drug features: DrugFingerprint + DrugGIP → concat (dim = 269+269 = 538) ──
+    fp  = pd.read_csv(os.path.join(base, 'DrugFingerprint.csv'), index_col=0).values.astype(float)
+    gip = pd.read_csv(os.path.join(base, 'DrugGIP.csv'),         index_col=0).values.astype(float)
+    x_drug = np.concatenate([fp, gip], axis=1)   # (n_drug, 538)
+
+    # ── Protein features: Protein_ESM (dim = 320), pad đến 538 ──
+    esm  = pd.read_csv(os.path.join(base, 'Protein_ESM.csv'), index_col=0).values.astype(float)
+    pad  = np.zeros((esm.shape[0], x_drug.shape[1] - esm.shape[1]), dtype=float)
+    x_prot = np.concatenate([esm, pad], axis=1)  # (n_prot, 538)
+
+    x = torch.tensor(np.vstack([x_drug, x_prot]), dtype=torch.float)
+
+    # ── Drug-Protein edges ──
+    dp = pd.read_csv(os.path.join(base, 'DrugProteinAssociationNumber.csv'), index_col=0)
+    n_drug   = x_drug.shape[0]
+    n_prot   = x_prot.shape[0]
+    offset_p = n_drug
+
+    drug_ids = dp.index.tolist()
+    prot_ids = dp[dp.columns[0]].tolist()
+
+    # Chuẩn hoá về 0-based nếu cần
+    drug_min = min(drug_ids) if drug_ids else 0
+    prot_min = min(prot_ids) if prot_ids else 0
+    drug_ids = [d - drug_min for d in drug_ids]
+    prot_ids = [p - prot_min for p in prot_ids]
+
+    # Lọc bỏ các edge có index ngoài bounds (lỗi dữ liệu trong CSV)
+    valid = [(d, p) for d, p in zip(drug_ids, prot_ids) if d < n_drug and p < n_prot]
+    if not valid:
+        raise ValueError(f"Không có edge hợp lệ nào trong {dataset}")
+    drug_ids, prot_ids = zip(*valid)
+
+    edge_index = torch.tensor(
+        [[d, p + offset_p] for d, p in zip(drug_ids, prot_ids)],
+        dtype=torch.long
+    ).t().contiguous()
+
+    print(f"Dataset   : {dataset}")
+    print(f"Drugs     : {n_drug}  |  Proteins: {x_prot.shape[0]}")
+    print(f"Edges     : {edge_index.shape[1]}")
+    print(f"Feature dim: {x.shape[1]}")
+
+    return x, edge_index, n_drug, offset_p
+
+def train_vgae(dataset: str = 'B-dataset'):
+    x, edge_index, n_drug, offset_p = load_graph_data(dataset)
     input_dim = x.size(1)
     model = build_vgae(input_dim)
     optimizer = torch.optim.Adam(model.parameters(), lr=LR)
@@ -81,12 +105,19 @@ def train_vgae():
                 truly_new.append(edge)
 
         if truly_new:
-            torch.save(torch.tensor(truly_new), 'src/generated_edges.pt')
-            print(f"✅ Đã lưu {len(truly_new)} liên kết 'vàng' vào generated_edges.pt")
+            os.makedirs(OUTPUT_DIR, exist_ok=True)
+            out_path = os.path.join(OUTPUT_DIR, f'{dataset}_generated_edges.pt')
+            torch.save(torch.tensor(truly_new), out_path)
+            print(f"✅ Đã lưu {len(truly_new)} liên kết vào {out_path}")
         else:
             print("⚠️ Không tìm thấy liên kết mới nào đủ tin cậy.")
             
         return truly_new, z
 
 if __name__ == "__main__":
-    train_vgae()
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--dataset', default='B-dataset',
+                        choices=['B-dataset', 'C-dataset', 'F-dataset'],
+                        help='Dataset để huấn luyện VGAE')
+    args = parser.parse_args()
+    train_vgae(args.dataset)

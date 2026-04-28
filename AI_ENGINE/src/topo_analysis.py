@@ -66,7 +66,7 @@ def compute_topo_features(
     if disease_c.max() > 0:
         disease_c = disease_c / disease_c.max()
 
-    print(">>> ĐÃ CẬP NHẬT ĐẶC TRƯNG TOPO VÀO EMBEDDING!")
+    print(">>> DA CAP NHAT DAC TRUNG TOPO VAO EMBEDDING!")
     return drug_c, disease_c
 
 

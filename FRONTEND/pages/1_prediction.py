@@ -24,6 +24,9 @@ from utils.api_client import (
     compare_matrix, save_history,
     get_drug_disease_interaction, get_drug_network, classify_batch,
     get_training_results_ai,
+    run_vgae, get_vgae_results,
+    get_comparison_ai,
+    get_ablation_all_variants_ai, run_ablation_ai,
 )
 from utils.chart_utils import (
     membership_chart, bar_chart_comparison,
@@ -37,6 +40,7 @@ st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
 *, body { font-family: 'Inter', sans-serif !important; }
+[data-testid="stIconMaterial"], span[translate="no"] { font-family: "Material Symbols Rounded", "Material Icons", sans-serif !important; }
 [data-testid="stAppViewContainer"] {
     background: #f1f5f9;
 }
@@ -44,9 +48,11 @@ st.markdown("""
     background: #ffffff !important;
     border-right: 1px solid #1e293b;
 }
-#MainMenu, footer, header { visibility: hidden; }
-[data-testid="stDecoration"] { display: none; }
-.stDeployButton { display: none; }
+#MainMenu, footer { display: none !important; }
+[data-testid="stDecoration"] { display: none !important; }
+[data-testid="stToolbarActions"] { display: none !important; }
+.stDeployButton { display: none !important; }
+[data-testid="stHeader"] { background: transparent !important; border: none !important; }
 
 /* Scrollbar */
 ::-webkit-scrollbar { width: 5px; }
@@ -383,11 +389,12 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 # ── Tabs ────────────────────────────────────────────────────────────────────
-tab1, tab2, tab3, tab4 = st.tabs([
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "🔍  Dự đoán đơn",
     "⊞  Ma trận so sánh",
     "🕸️  Đồ thị mạng lưới",
     "✦  Sinh phân tử mới",
+    "📊  So sánh mô hình",
 ])
 
 
@@ -1505,68 +1512,563 @@ with tab4:
             ✦ Sinh phân tử mới (VGAE)
         </div>
         <div style="color:#4b5563;font-size:0.82rem;">
-            Variational Graph Autoencoder đề xuất ứng viên thuốc mới nhắm đến bệnh mục tiêu.
+            Variational Graph Autoencoder đề xuất liên kết thuốc–protein tiềm năng chưa được khám phá.
         </div>
     </div>""", unsafe_allow_html=True)
 
     vg_left, vg_right = st.columns([1, 2], gap="medium")
+
     with vg_left:
         st.markdown('<div class="panel">', unsafe_allow_html=True)
         st.markdown('<div class="panel-title">🎯 Cấu hình VGAE</div>', unsafe_allow_html=True)
-        target_disease = st.selectbox("Bệnh mục tiêu",
-                                       [d.get("id","?") for d in diseases_all[:30]],
-                                       key="gen_disease", label_visibility="collapsed")
-        threshold = st.slider("Ngưỡng tin cậy", 0.5, 0.99, 0.90, 0.01)
+
+        vgae_dataset = st.selectbox(
+            "Dataset", ["B-dataset", "C-dataset", "F-dataset"],
+            key="vgae_dataset",
+        )
         st.markdown("</div>", unsafe_allow_html=True)
         st.markdown("<br>", unsafe_allow_html=True)
-        if st.button("✦  Sinh phân tử mới", type="primary", key="gen_btn",
-                     use_container_width=True):
-            st.markdown("""
-            <div style="background:rgba(99,102,241,0.08);border:1px solid rgba(99,102,241,0.25);
-                        border-radius:12px;padding:16px 20px;color:#4338ca;font-size:0.85rem;">
-                ℹ️ VGAE module đang khởi động... Kết quả sẽ hiển thị sau khi
-                <code style="background:rgba(99,102,241,0.15);padding:2px 6px;border-radius:4px;">
-                train_vgae.py</code> hoàn tất.
-            </div>""", unsafe_allow_html=True)
-            st.code("cd AI_ENGINE\npython src/train_vgae.py --disease " + target_disease,
-                    language="bash")
+
+        run_btn = st.button("▶  Chạy VGAE", type="primary", key="gen_btn",
+                            use_container_width=True)
+
+        # ── Nút xem kết quả đã có sẵn (không cần train lại) ──
+        load_btn = st.button("📂  Xem kết quả cũ", key="load_vgae_btn",
+                             use_container_width=True)
 
     with vg_right:
-        st.markdown("""
-        <div class="panel">
-            <div class="panel-title">📖 Hướng dẫn sử dụng VGAE</div>
-            <div style="display:flex;flex-direction:column;gap:14px;margin-top:8px;">
-                <div style="display:flex;gap:12px;align-items:flex-start;">
-                    <div style="width:28px;height:28px;border-radius:8px;background:linear-gradient(135deg,#6366f1,#818cf8);
-                                display:flex;align-items:center;justify-content:center;font-size:0.8rem;font-weight:700;color:#fff;flex-shrink:0;">1</div>
-                    <div>
-                        <div style="color:#1e293b;font-size:0.88rem;font-weight:600;">Cài đặt môi trường</div>
-                        <div style="color:#4b5563;font-size:0.78rem;margin-top:2px;">Đảm bảo gcn_venv đã cài đầy đủ torch, dgl, rdkit</div>
+        # ─── Chạy training mới ──────────────────────────────────────
+        if run_btn:
+            st.info("⏳ Đang huấn luyện VGAE... (500 epochs, ~1-3 phút)")
+            with st.spinner("Training VGAE..."):
+                resp = run_vgae(vgae_dataset)
+
+            if resp.get("success"):
+                st.success(f"✅ Hoàn tất! Dataset: **{resp.get('dataset')}**")
+            else:
+                st.error("❌ VGAE gặp lỗi. Xem log bên dưới.")
+
+            log_text = resp.get("log", "")
+            if log_text:
+                with st.expander("📋 Training log", expanded=not resp.get("success")):
+                    st.code(log_text, language="text")
+
+            # Load kết quả ngay sau khi train xong
+            if resp.get("success"):
+                st.session_state["vgae_result_dataset"] = vgae_dataset
+                st.rerun()
+
+        # ─── Load kết quả cũ ────────────────────────────────────────
+        if load_btn:
+            st.session_state["vgae_result_dataset"] = vgae_dataset
+
+        # ─── Hiển thị kết quả ────────────────────────────────────────
+        result_ds = st.session_state.get("vgae_result_dataset")
+        if result_ds:
+            data = get_vgae_results(result_ds)
+
+            if not data.get("generated"):
+                err = data.get("error", "")
+                msg = f"⚠️ Chưa có kết quả cho `{result_ds}`. Nhấn ▶ Chạy VGAE trước."
+                if err:
+                    msg += f"\n\n🔴 Lỗi API: `{err}`"
+                st.warning(msg)
+            else:
+                edges = data.get("edges", [])
+                count = data.get("count", len(edges))
+
+                st.markdown(f"""
+                <div style="display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap;">
+                    <div style="background:rgba(99,102,241,0.1);border:1px solid rgba(99,102,241,0.3);
+                                border-radius:10px;padding:10px 18px;text-align:center;">
+                        <div style="font-size:1.5rem;font-weight:800;color:#6366f1;">{count}</div>
+                        <div style="font-size:0.72rem;color:#4b5563;">Liên kết mới</div>
+                    </div>
+                    <div style="background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.3);
+                                border-radius:10px;padding:10px 18px;text-align:center;">
+                        <div style="font-size:1.5rem;font-weight:800;color:#10b981;">{len(set(e["drug_idx"] for e in edges))}</div>
+                        <div style="font-size:0.72rem;color:#4b5563;">Thuốc liên quan</div>
+                    </div>
+                    <div style="background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.3);
+                                border-radius:10px;padding:10px 18px;text-align:center;">
+                        <div style="font-size:1.5rem;font-weight:800;color:#f59e0b;">{len(set(e["prot_idx"] for e in edges))}</div>
+                        <div style="font-size:0.72rem;color:#4b5563;">Protein liên quan</div>
                     </div>
                 </div>
-                <div style="display:flex;gap:12px;align-items:flex-start;">
-                    <div style="width:28px;height:28px;border-radius:8px;background:linear-gradient(135deg,#0ea5e9,#38bdf8);
-                                display:flex;align-items:center;justify-content:center;font-size:0.8rem;font-weight:700;color:#fff;flex-shrink:0;">2</div>
-                    <div>
-                        <div style="color:#1e293b;font-size:0.88rem;font-weight:600;">Chạy VGAE training</div>
-                        <div style="color:#4b5563;font-size:0.78rem;margin-top:2px;">train_vgae.py học phân bố latent của đồ thị</div>
+                """, unsafe_allow_html=True)
+
+                rtab1, rtab2, rtab3, rtab4 = st.tabs(["📋 Bảng", "🕸️ Mạng lưới", "📊 Biểu đồ theo Thuốc", "🔬 Biểu đồ theo Protein"])
+
+                # ── Tab: Bảng dữ liệu ──────────────────────────────
+                with rtab1:
+                    import pandas as pd
+                    df_edges = pd.DataFrame([{
+                        "Thuốc":   e.get("drug_name", f"Drug_{e['drug_idx']}"),
+                        "Drug ID": e.get("drug_id", ""),
+                        "Protein": e.get("prot_name", f"Prot_{e['prot_idx']}"),
+                        "Prot ID": e.get("prot_id", ""),
+                    } for e in edges])
+                    st.dataframe(df_edges, use_container_width=True, height=400)
+
+                # ── Tab: Mạng lưới bipartite ───────────────────────
+                with rtab2:
+                    drug_nodes  = sorted(set(e["drug_idx"]  for e in edges))
+                    prot_nodes  = sorted(set(e["prot_idx"]  for e in edges))
+                    drug_pos = {d: i for i, d in enumerate(drug_nodes)}
+                    prot_pos = {p: i for i, p in enumerate(prot_nodes)}
+
+                    node_x, node_y, node_text, node_color = [], [], [], []
+                    for d in drug_nodes:
+                        node_x.append(0)
+                        node_y.append(drug_pos[d])
+                        node_text.append(next((e["drug_name"] for e in edges if e["drug_idx"]==d), f"Drug_{d}"))
+                        node_color.append("#6366f1")
+                    for p in prot_nodes:
+                        node_x.append(1)
+                        node_y.append(prot_pos[p])
+                        node_text.append(next((e["prot_name"] for e in edges if e["prot_idx"]==p), f"Prot_{p}"))
+                        node_color.append("#10b981")
+
+                    edge_x, edge_y = [], []
+                    for e in edges:
+                        edge_x += [0, 1, None]
+                        edge_y += [drug_pos[e["drug_idx"]], prot_pos[e["prot_idx"]], None]
+
+                    fig_net = go.Figure()
+                    fig_net.add_trace(go.Scatter(
+                        x=edge_x, y=edge_y, mode="lines",
+                        line=dict(color="rgba(148,163,184,0.4)", width=1),
+                        hoverinfo="none",
+                    ))
+                    fig_net.add_trace(go.Scatter(
+                        x=node_x, y=node_y, mode="markers+text",
+                        marker=dict(size=10, color=node_color),
+                        text=node_text, textposition="middle right",
+                        textfont=dict(size=9),
+                        hoverinfo="text",
+                    ))
+                    fig_net.update_layout(
+                        showlegend=False, height=500,
+                        xaxis=dict(showgrid=False, zeroline=False, showticklabels=False,
+                                   tickvals=[0, 1], ticktext=["💊 Thuốc", "🔬 Protein"]),
+                        yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+                        margin=dict(l=10, r=10, t=10, b=10),
+                        paper_bgcolor="rgba(0,0,0,0)",
+                        plot_bgcolor="rgba(0,0,0,0)",
+                        annotations=[
+                            dict(x=0, y=len(drug_nodes)+0.5, text="💊 Thuốc",
+                                 showarrow=False, font=dict(size=13, color="#6366f1")),
+                            dict(x=1, y=len(prot_nodes)+0.5, text="🔬 Protein",
+                                 showarrow=False, font=dict(size=13, color="#10b981")),
+                        ],
+                    )
+                    st.plotly_chart(fig_net, use_container_width=True)
+
+                # ── Tab: Biểu đồ theo Thuốc ───────────────────────
+                with rtab3:
+                    from collections import Counter
+                    drug_counts = Counter(e.get("drug_name", f"Drug_{e['drug_idx']}") for e in edges)
+                    # Hiển thị TẤT CẢ thuốc, sắp xếp giảm dần theo số liên kết
+                    all_drugs = dict(sorted(drug_counts.items(), key=lambda x: x[1], reverse=True))
+                    bar_h = max(350, len(all_drugs) * 22)
+                    fig_drug = go.Figure(go.Bar(
+                        x=list(all_drugs.values()),
+                        y=list(all_drugs.keys()),
+                        orientation="h",
+                        marker_color="#6366f1",
+                        text=list(all_drugs.values()),
+                        textposition="outside",
+                    ))
+                    fig_drug.update_layout(
+                        title=f"Tất cả {len(all_drugs)} thuốc có liên kết mới với Protein",
+                        height=bar_h, margin=dict(l=10, r=40, t=40, b=10),
+                        paper_bgcolor="rgba(0,0,0,0)",
+                        plot_bgcolor="rgba(0,0,0,0)",
+                        yaxis=dict(autorange="reversed"),
+                        xaxis_title="Số liên kết mới",
+                    )
+                    st.plotly_chart(fig_drug, use_container_width=True)
+
+                # ── Tab: Biểu đồ theo Protein ──────────────────────
+                with rtab4:
+                    from collections import Counter as _Counter
+                    prot_counts = _Counter(e.get("prot_name", f"Prot_{e['prot_idx']}") for e in edges)
+                    all_prots = dict(sorted(prot_counts.items(), key=lambda x: x[1], reverse=True))
+                    bar_h2 = max(350, len(all_prots) * 22)
+                    fig_prot = go.Figure(go.Bar(
+                        x=list(all_prots.values()),
+                        y=list(all_prots.keys()),
+                        orientation="h",
+                        marker_color="#10b981",
+                        text=list(all_prots.values()),
+                        textposition="outside",
+                    ))
+                    fig_prot.update_layout(
+                        title=f"Tất cả {len(all_prots)} Protein có liên kết mới với Thuốc",
+                        height=bar_h2, margin=dict(l=10, r=40, t=40, b=10),
+                        paper_bgcolor="rgba(0,0,0,0)",
+                        plot_bgcolor="rgba(0,0,0,0)",
+                        yaxis=dict(autorange="reversed"),
+                        xaxis_title="Số liên kết mới",
+                    )
+                    st.plotly_chart(fig_prot, use_container_width=True)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# TAB 5 – So sánh mô hình gốc vs pipeline
+# ═══════════════════════════════════════════════════════════════════════════
+with tab5:
+
+    # ── Helpers dùng chung trong tab ──────────────────────────────────────
+    def _hex_rgba(hex_color: str, alpha: float = 0.15) -> str:
+        h = hex_color.lstrip("#")
+        r2, g2, b2 = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+        return f"rgba({r2},{g2},{b2},{alpha})"
+
+    METRICS = ["AUC", "AUPR", "Accuracy", "Precision", "Recall", "F1", "MCC"]
+
+    # Metadata 7 ablation variants (đồng bộ với API)
+    ABLATION_META = {
+        "sim_only":            dict(label="Similarity Only",              color="#3B82F6", icon="📐", desc="Chỉ dùng Similarity (không GCN, không Fuzzy)"),
+        "gcn_only":            dict(label="GCN Only",                     color="#10B981", icon="🕸️", desc="Chỉ dùng GCN heterogeneous network"),
+        "sim_transformer":     dict(label="Sim + Transformer",            color="#8B5CF6", icon="🧬", desc="Similarity + Transformer feature extraction"),
+        "gcn_transformer":     dict(label="GCN + Transformer",            color="#F59E0B", icon="🔬", desc="GCN + Transformer nâng cao"),
+        "sim_gcn":             dict(label="Sim + GCN (Fusion)",           color="#EF4444", icon="🔗", desc="Fusion: Similarity + GCN"),
+        "sim_transformer_gcn": dict(label="Sim + Trans + GCN",            color="#F97316", icon="⚡", desc="Fusion: Similarity + Transformer + GCN"),
+        "full":                dict(label="Full Model (AMNTDDA_Fuzzy)",   color="#6366F1", icon="🎯", desc="Full pipeline: Sim + GCN + Modality Interaction + Fuzzy"),
+    }
+    ABLATION_ORDER = ["sim_only","gcn_only","sim_transformer","gcn_transformer","sim_gcn","sim_transformer_gcn","full"]
+
+    PIPELINE_META = {
+        "AMNTDDA":       dict(label="AMNTDDA (Gốc)",              color="#6366f1", desc="Baseline — không GCN, không Fuzzy"),
+        "AMNTDDA_GCN":   dict(label="AMNTDDA_GCN",                color="#f59e0b", desc="Thêm GCN encoder, không Fuzzy"),
+        "AMNTDDA_Fuzzy": dict(label="AMNTDDA_Fuzzy (Full)",       color="#10b981", desc="GCN + Fuzzy Mamdani — pipeline đầy đủ"),
+    }
+
+    st.markdown("""
+    <div style="margin-bottom:16px;">
+        <div style="font-size:1.1rem;font-weight:700;color:#1e293b;margin-bottom:4px;">
+            📊 So sánh mô hình &amp; Ablation Study
+        </div>
+        <div style="color:#4b5563;font-size:0.82rem;">
+            Xem so sánh 3 phiên bản pipeline chính <b>(AMNTDDA → GCN → Fuzzy)</b>
+            hoặc phân tích sâu 7 biến thể ablation để hiểu đóng góp của từng thành phần.
+        </div>
+    </div>""", unsafe_allow_html=True)
+
+    view_mode = st.radio(
+        "Chế độ xem",
+        ["🔀 Pipeline (3 mô hình)", "🔬 Ablation Study (7 biến thể)"],
+        horizontal=True,
+        key="cmp_view_mode",
+        label_visibility="collapsed",
+    )
+
+    # ══════════════════════════════════════════════════════════════════
+    # SECTION A — Pipeline comparison (3 models)
+    # ══════════════════════════════════════════════════════════════════
+    if view_mode == "🔀 Pipeline (3 mô hình)":
+        cmp_data    = get_comparison_ai(dataset)
+        models_data = {k: v for k, v in cmp_data.items() if isinstance(v, dict)}
+
+        if not models_data:
+            st.info("⚠️ Chưa có dữ liệu so sánh pipeline. Hãy chạy training AMNTDDA, AMNTDDA_GCN và AMNTDDA_Fuzzy trước.")
+        else:
+            # Sắp xếp theo thứ tự pipeline
+            ordered = {k: models_data[k] for k in ["AMNTDDA","AMNTDDA_GCN","AMNTDDA_Fuzzy"] if k in models_data}
+            if not ordered:
+                ordered = models_data
+
+            # Thẻ tóm tắt
+            cards_cols = st.columns(len(ordered))
+            for i, (key, mdata) in enumerate(ordered.items()):
+                meta  = PIPELINE_META.get(key, dict(label=key, color="#6366f1", desc=""))
+                color = meta["color"]
+                label = meta["label"]
+                auc   = mdata.get("AUC_mean", 0)
+                aupr  = mdata.get("AUPR_mean", 0)
+                f1    = mdata.get("F1_mean", 0)
+                nf    = mdata.get("n_folds", "?")
+                with cards_cols[i]:
+                    st.markdown(f"""
+                    <div style="background:#fff;border:1.5px solid {color}40;border-radius:14px;
+                                padding:18px;text-align:center;box-shadow:0 2px 12px {color}12;">
+                        <div style="font-size:0.68rem;font-weight:700;color:{color};
+                                    text-transform:uppercase;letter-spacing:0.07em;margin-bottom:6px;">
+                            {label}
+                        </div>
+                        <div style="font-size:1.9rem;font-weight:800;color:{color};">{auc:.4f}</div>
+                        <div style="font-size:0.7rem;color:#64748b;margin-bottom:8px;">AUC</div>
+                        <div style="display:flex;justify-content:center;gap:14px;">
+                            <div><div style="font-size:0.95rem;font-weight:700;color:#1e293b;">{aupr:.4f}</div>
+                                 <div style="font-size:0.65rem;color:#64748b;">AUPR</div></div>
+                            <div><div style="font-size:0.95rem;font-weight:700;color:#1e293b;">{f1:.4f}</div>
+                                 <div style="font-size:0.65rem;color:#64748b;">F1</div></div>
+                        </div>
+                        <div style="margin-top:6px;font-size:0.65rem;color:#94a3b8;">{nf} folds</div>
+                    </div>""", unsafe_allow_html=True)
+
+            st.markdown("<br>", unsafe_allow_html=True)
+            pt1, pt2, pt3 = st.tabs(["📊 Biểu đồ cột", "🕷️ Radar chart", "📋 Bảng số liệu"])
+
+            with pt1:
+                metric_sel = st.selectbox("Chỉ số", METRICS, key="pipe_metric_sel")
+                fig = go.Figure()
+                for key, mdata in ordered.items():
+                    meta  = PIPELINE_META.get(key, dict(label=key, color="#6366f1"))
+                    mv    = mdata.get(f"{metric_sel}_mean", 0)
+                    sv    = mdata.get(f"{metric_sel}_std", 0)
+                    fig.add_trace(go.Bar(
+                        name=meta["label"], x=[meta["label"]], y=[mv],
+                        error_y=dict(type="data", array=[sv], visible=True),
+                        marker_color=meta["color"],
+                        text=[f"{mv:.4f}"], textposition="outside",
+                    ))
+                fig.update_layout(
+                    title=f"Pipeline — {metric_sel} — {dataset}",
+                    yaxis=dict(range=[0, 1.1], title=metric_sel),
+                    barmode="group", height=420, showlegend=True,
+                    paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                    margin=dict(l=10, r=10, t=50, b=10),
+                )
+                st.plotly_chart(fig, use_container_width=True)
+                means   = {k: v.get(f"{metric_sel}_mean", 0) for k, v in ordered.items()}
+                best_k  = max(means, key=means.get)
+                best_lb = PIPELINE_META.get(best_k, {}).get("label", best_k)
+                st.success(f"✅ **{best_lb}** đạt {metric_sel} cao nhất: **{means[best_k]:.4f}**")
+
+            with pt2:
+                rm = ["AUC","AUPR","Accuracy","F1","MCC"]
+                fig2 = go.Figure()
+                for key, mdata in ordered.items():
+                    meta  = PIPELINE_META.get(key, dict(label=key, color="#6366f1"))
+                    vals  = [mdata.get(f"{m}_mean", 0) for m in rm]
+                    vals += [vals[0]]
+                    fig2.add_trace(go.Scatterpolar(
+                        r=vals, theta=rm+[rm[0]], name=meta["label"],
+                        fill="toself",
+                        fillcolor=_hex_rgba(meta["color"], 0.15),
+                        line=dict(color=meta["color"], width=2),
+                    ))
+                fig2.update_layout(
+                    polar=dict(radialaxis=dict(visible=True, range=[0,1], tickfont=dict(size=9))),
+                    showlegend=True, height=460,
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    margin=dict(l=30,r=30,t=30,b=30),
+                    title=f"Radar — {dataset}",
+                )
+                st.plotly_chart(fig2, use_container_width=True)
+
+            with pt3:
+                import pandas as _pd
+                rows = []
+                for key, mdata in ordered.items():
+                    meta = PIPELINE_META.get(key, dict(label=key))
+                    row  = {"Mô hình": meta["label"], "Folds": mdata.get("n_folds","?")}
+                    for m in METRICS:
+                        mn = mdata.get(f"{m}_mean")
+                        sd = mdata.get(f"{m}_std")
+                        row[m] = f"{mn:.4f} ± {sd:.4f}" if mn is not None else "—"
+                    rows.append(row)
+                df_p = _pd.DataFrame(rows).set_index("Mô hình")
+                st.dataframe(df_p, use_container_width=True)
+                st.download_button("⬇️ Tải CSV", df_p.to_csv(),
+                                   f"{dataset}_pipeline_comparison.csv", "text/csv",
+                                   key="dl_pipe_csv")
+
+    # ══════════════════════════════════════════════════════════════════
+    # SECTION B — Ablation Study (7 variants)
+    # ══════════════════════════════════════════════════════════════════
+    else:
+        abl_data = get_ablation_all_variants_ai(dataset)
+        variants_raw = abl_data.get("variants", {})
+
+        # Phân loại trained/untrained
+        trained_keys   = [k for k in ABLATION_ORDER if variants_raw.get(k, {}).get("trained", False)]
+        untrained_keys = [k for k in ABLATION_ORDER if k not in trained_keys]
+
+        # Nút chạy training
+        with st.expander("⚙️ Chạy Ablation Training", expanded=(len(trained_keys) == 0)):
+            # Hiển thị trạng thái từng biến thể
+            status_cols = st.columns(7)
+            for idx, k in enumerate(ABLATION_ORDER):
+                meta = ABLATION_META[k]
+                is_trained = k in trained_keys
+                badge = "✅" if is_trained else "⬜"
+                status_cols[idx].markdown(
+                    f"<div style='text-align:center;font-size:11px'>"
+                    f"{badge}<br><b>{meta['icon']}</b><br>{meta['label'].split('(')[0].strip()}</div>",
+                    unsafe_allow_html=True,
+                )
+
+            st.markdown(f"**{len(trained_keys)}/7** biến thể đã có kết quả cache.")
+            col_a, col_b, col_c = st.columns([2, 1, 1])
+            with col_a:
+                abl_variants_sel = st.multiselect(
+                    "Chọn biến thể muốn train (để trống = train tất cả chưa có kết quả)",
+                    options=ABLATION_ORDER,
+                    default=untrained_keys if untrained_keys else [],
+                    format_func=lambda k: f"{ABLATION_META[k]['icon']} {ABLATION_META[k]['label']}",
+                    key="abl_variant_sel",
+                )
+            with col_b:
+                force_retrain = st.checkbox("🔄 Bắt buộc train lại", value=False, key="abl_force",
+                                            help="Nếu bật, sẽ xóa kết quả cũ và train lại từ đầu")
+            with col_c:
+                st.markdown("<br>", unsafe_allow_html=True)
+                run_abl_btn = st.button("▶️ Chạy Training", key="run_abl_btn",
+                                        use_container_width=True)
+            if run_abl_btn:
+                sel_str = ",".join(abl_variants_sel) if abl_variants_sel else "all"
+                with st.spinner(f"Đang train ablation variants ({sel_str})… có thể mất vài giờ"):
+                    res = run_ablation_ai(dataset, sel_str, force=force_retrain)
+                if res.get("success"):
+                    st.success("✅ Training hoàn tất!")
+                    st.rerun()
+                else:
+                    st.error("❌ Lỗi training")
+                    st.code(res.get("log","")[-3000:])
+
+        if not trained_keys:
+            st.info("⚠️ Chưa có biến thể nào được train. Nhấn **Chạy Training** ở trên để bắt đầu.")
+        else:
+            # Selectbox chọn biến thể để xem chi tiết (+ "Tất cả")
+            view_opts = ["📊 Tất cả biến thể"] + [
+                f"{ABLATION_META[k]['icon']} {ABLATION_META[k]['label']}" for k in trained_keys
+            ]
+            abl_view = st.selectbox("Xem chi tiết biến thể", view_opts, key="abl_detail_sel",
+                                     label_visibility="collapsed")
+
+            # Lấy data chỉ của biến thể đã train
+            trained_data = {k: variants_raw[k] for k in trained_keys}
+
+            # ── Overview: thanh AUC summary ─────────────────────────
+            st.markdown("#### Tổng quan AUC các biến thể đã train")
+            auc_vals  = [trained_data[k].get("AUC_mean") or 0 for k in trained_keys]
+            auc_stds  = [trained_data[k].get("AUC_std") or 0 for k in trained_keys]
+            auc_labels= [f"{ABLATION_META[k]['icon']} {ABLATION_META[k]['label']}" for k in trained_keys]
+            auc_colors= [ABLATION_META[k]["color"] for k in trained_keys]
+            fig_auc = go.Figure(go.Bar(
+                x=auc_labels, y=auc_vals,
+                error_y=dict(type="data", array=auc_stds, visible=True),
+                marker_color=auc_colors,
+                text=[f"{v:.4f}" for v in auc_vals], textposition="outside",
+            ))
+            fig_auc.update_layout(
+                yaxis=dict(range=[0, 1.1], title="AUC"),
+                height=340, showlegend=False,
+                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                margin=dict(l=10, r=10, t=20, b=10),
+                xaxis=dict(tickangle=-20),
+            )
+            st.plotly_chart(fig_auc, use_container_width=True)
+
+            st.markdown("<br>", unsafe_allow_html=True)
+            at1, at2, at3, at4 = st.tabs(["📊 So sánh chỉ số", "🕷️ Radar chart", "🔍 Chi tiết biến thể", "📋 Bảng đầy đủ"])
+
+            # Quyết định hiển thị tất cả hay một biến thể
+            if abl_view == "📊 Tất cả biến thể":
+                display_keys = trained_keys
+            else:
+                # Tìm key từ label
+                match_key = next((k for k in trained_keys
+                                  if ABLATION_META[k]["label"] in abl_view), None)
+                display_keys = [match_key] if match_key else trained_keys
+
+            with at1:
+                abl_metric = st.selectbox("Chỉ số", METRICS, key="abl_metric_sel")
+                fig3 = go.Figure()
+                for k in display_keys:
+                    d     = trained_data[k]
+                    mv    = d.get(f"{abl_metric}_mean") or 0
+                    sv    = d.get(f"{abl_metric}_std") or 0
+                    meta  = ABLATION_META[k]
+                    lbl   = f"{meta['icon']} {meta['label']}"
+                    fig3.add_trace(go.Bar(
+                        name=lbl, x=[lbl], y=[mv],
+                        error_y=dict(type="data", array=[sv], visible=True),
+                        marker_color=meta["color"],
+                        text=[f"{mv:.4f}"], textposition="outside",
+                    ))
+                fig3.update_layout(
+                    title=f"Ablation — {abl_metric} — {dataset}",
+                    yaxis=dict(range=[0, 1.1], title=abl_metric),
+                    barmode="group", height=420, showlegend=len(display_keys) > 1,
+                    paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                    margin=dict(l=10, r=10, t=50, b=10),
+                )
+                st.plotly_chart(fig3, use_container_width=True)
+                if display_keys:
+                    bk  = max(display_keys, key=lambda k: trained_data[k].get(f"{abl_metric}_mean") or 0)
+                    bv  = trained_data[bk].get(f"{abl_metric}_mean", 0)
+                    blb = f"{ABLATION_META[bk]['icon']} {ABLATION_META[bk]['label']}"
+                    st.success(f"✅ **{blb}** đạt {abl_metric} cao nhất: **{bv:.4f}**")
+
+            with at2:
+                rm2  = ["AUC","AUPR","Accuracy","F1","MCC"]
+                fig4 = go.Figure()
+                for k in display_keys:
+                    d    = trained_data[k]
+                    meta = ABLATION_META[k]
+                    vals = [d.get(f"{m}_mean") or 0 for m in rm2]
+                    vals += [vals[0]]
+                    fig4.add_trace(go.Scatterpolar(
+                        r=vals, theta=rm2+[rm2[0]],
+                        name=f"{meta['icon']} {meta['label']}",
+                        fill="toself",
+                        fillcolor=_hex_rgba(meta["color"], 0.15),
+                        line=dict(color=meta["color"], width=2),
+                    ))
+                fig4.update_layout(
+                    polar=dict(radialaxis=dict(visible=True, range=[0,1], tickfont=dict(size=9))),
+                    showlegend=True, height=480,
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    margin=dict(l=30,r=30,t=30,b=30),
+                    title=f"Ablation Radar — {dataset}",
+                )
+                st.plotly_chart(fig4, use_container_width=True)
+
+            with at3:
+                sel_k = display_keys[0] if len(display_keys) == 1 else st.selectbox(
+                    "Chọn biến thể xem chi tiết",
+                    options=display_keys,
+                    format_func=lambda k: f"{ABLATION_META[k]['icon']} {ABLATION_META[k]['label']}",
+                    key="abl_detail_variant",
+                )
+                d    = trained_data[sel_k]
+                meta = ABLATION_META[sel_k]
+                st.markdown(f"""
+                <div style="background:#fff;border:1.5px solid {meta['color']}40;
+                            border-radius:12px;padding:16px;margin-bottom:12px;">
+                    <div style="font-size:1rem;font-weight:700;color:{meta['color']};">
+                        {meta['icon']} {meta['label']}
                     </div>
-                </div>
-                <div style="display:flex;gap:12px;align-items:flex-start;">
-                    <div style="width:28px;height:28px;border-radius:8px;background:linear-gradient(135deg,#10b981,#34d399);
-                                display:flex;align-items:center;justify-content:center;font-size:0.8rem;font-weight:700;color:#fff;flex-shrink:0;">3</div>
-                    <div>
-                        <div style="color:#1e293b;font-size:0.88rem;font-weight:600;">Xem kết quả</div>
-                        <div style="color:#4b5563;font-size:0.78rem;margin-top:2px;">Ứng viên phân tử mới được lưu và hiển thị tại đây</div>
-                    </div>
-                </div>
-            </div>
-            <div style="margin-top:20px;background:rgba(10,16,32,0.8);border:1px solid rgba(99,102,241,0.15);
-                        border-radius:8px;padding:12px 14px;">
-                <div style="font-size:0.7rem;color:#4b5563;font-weight:600;margin-bottom:6px;letter-spacing:0.06em;">LỆNH CHẠY</div>
-                <code style="color:#818cf8;font-size:0.8rem;">
-                    python AI_ENGINE/src/train_vgae.py<br>
-                    --dataset C-dataset --epochs 500
-                </code>
-            </div>
-        </div>""", unsafe_allow_html=True)
+                    <div style="color:#475569;font-size:0.8rem;margin-top:4px;">{meta['desc']}</div>
+                </div>""", unsafe_allow_html=True)
+                metric_cols = st.columns(len(METRICS))
+                for j, m in enumerate(METRICS):
+                    mv = d.get(f"{m}_mean")
+                    sv = d.get(f"{m}_std")
+                    with metric_cols[j]:
+                        st.metric(m,
+                                  f"{mv:.4f}" if mv is not None else "—",
+                                  f"±{sv:.4f}" if sv is not None else "")
+
+            with at4:
+                import pandas as _pd2
+                rows2 = []
+                for k in trained_keys:
+                    d    = trained_data[k]
+                    meta = ABLATION_META[k]
+                    row  = {"Biến thể": f"{meta['icon']} {meta['label']}", "Folds": d.get("n_folds","?")}
+                    for m in METRICS:
+                        mn = d.get(f"{m}_mean")
+                        sd = d.get(f"{m}_std")
+                        row[m] = f"{mn:.4f} ± {sd:.4f}" if mn is not None else "—"
+                    rows2.append(row)
+                df_abl = _pd2.DataFrame(rows2).set_index("Biến thể")
+                st.dataframe(df_abl, use_container_width=True)
+                st.download_button("⬇️ Tải CSV", df_abl.to_csv(),
+                                   f"{dataset}_ablation_comparison.csv", "text/csv",
+                                   key="dl_abl_csv")
+
